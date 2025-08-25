@@ -3,7 +3,6 @@ const { sendOrderConfirmationEmail } = require('../services/emailService');
 
 const createOrder = async (req, res) => {
   try {
-    // Session validation
     if (!req.session?.user?.id) {
       return res.status(401).json({ 
         success: false,
@@ -11,7 +10,6 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Destructure with defaults
     const { 
       paymentMethod = 'Unknown',
       cartItems = [],
@@ -22,59 +20,42 @@ const createOrder = async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!paymentMethod || !Array.isArray(cartItems) || !shippingAddress) {
+    if (!paymentMethod || !Array.isArray(cartItems) || cartItems.length === 0 || !shippingAddress) {
       return res.status(400).json({
         success: false,
         message: 'Missing required order fields'
       });
     }
 
-    // Convert all numeric values with validation
-    const numericSubtotal = Math.max(0, Number(subtotal));
-    const numericShippingCost = Math.max(0, Number(shippingCost));
-    const numericTotal = Math.max(0, Number(total));
-
-    // Verify numeric conversions
-    if (isNaN(numericSubtotal) || isNaN(numericShippingCost) || isNaN(numericTotal)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid numeric values in order data'
-      });
+    // Validate cart items
+    for (const item of cartItems) {
+      if (!item.id || !item.name || item.price === undefined || item.quantity === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid cart items format'
+        });
+      }
     }
 
-    // Create order in database
+    // Create order
     const order = await orderModel.createOrder(req.session.user.id, {
       paymentMethod,
-      cartItems: cartItems.map(item => ({
-        ...item,
-        price: Number(item.price) || 0,
-        quantity: Number(item.quantity) || 0
-      })),
-      subtotal: numericSubtotal,
-      shippingCost: numericShippingCost,
-      total: numericTotal,
+      cartItems,
+      subtotal: Math.max(0, Number(subtotal)),
+      shippingCost: Math.max(0, Number(shippingCost)),
+      total: Math.max(0, Number(total)),
       shippingAddress
     });
 
-    // Prepare data for email with additional validation
-    const emailData = {
-      id: order.id.toString(),
-      paymentMethod: order.payment_method || paymentMethod,
-      total: Number(order.total) || numericTotal,
-      shippingAddress: order.shipping_address || shippingAddress,
-      items: (order.cartItems || cartItems).map(item => ({
-        name: String(item.name || 'Unknown Product'),
-        price: Number(item.price) || 0,
-        quantity: Number(item.quantity) || 0
-      })),
-      orderDate: order.order_date || new Date()
-    };
-
-    // Send confirmation email (fire-and-forget)
-    sendOrderConfirmationEmail(emailData)
-      .catch(emailError => {
-        console.error('Email sending failed (non-blocking):', emailError);
-      });
+    // Send confirmation email
+    sendOrderConfirmationEmail({
+      id: order.id,
+      paymentMethod: order.payment_method,
+      total: order.total,
+      shippingAddress: order.shipping_address,
+      items: cartItems,
+      orderDate: order.order_date
+    }).catch(err => console.error('Email sending failed:', err));
 
     return res.status(201).json({
       success: true,

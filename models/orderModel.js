@@ -1,8 +1,9 @@
 const pool = require('../config/db');
+const productModel = require('./productModel');
 
 const createOrder = async (userId, orderData) => {
   const client = await pool.connect();
-  
+
   try {
     await client.query('BEGIN');
 
@@ -28,12 +29,16 @@ const createOrder = async (userId, orderData) => {
       trackingId,
       status
     ];
-    
+
     const orderResult = await client.query(orderQuery, orderValues);
     const order = orderResult.rows[0];
 
-    // Insert order items
+    // Insert order items and update stock
     for (const item of orderData.cartItems) {
+      // Update product stock
+      await productModel.updateProductStock(item.id, item.quantity, client);
+
+      // Insert order item
       const itemQuery = `
         INSERT INTO order_items (
           order_id, product_id, product_name, product_price, quantity
@@ -61,7 +66,7 @@ const createOrder = async (userId, orderData) => {
 
 const getOrderDetails = async (userId, orderId) => {
   const client = await pool.connect();
-  
+
   try {
     // Get order with formatted dates
     const orderQuery = `
@@ -84,7 +89,7 @@ const getOrderDetails = async (userId, orderId) => {
       WHERE id = $1 AND user_id = $2
     `;
     const orderResult = await client.query(orderQuery, [orderId, userId]);
-    
+
     if (orderResult.rows.length === 0) {
       return null;
     }
@@ -115,7 +120,7 @@ const getOrderDetails = async (userId, orderId) => {
 
 const getOrdersByUser = async (userId) => {
   const client = await pool.connect();
-  
+
   try {
     // Get orders with formatted dates
     const ordersQuery = `
